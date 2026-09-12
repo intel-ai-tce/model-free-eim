@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Standalone vLLM Recipes Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Intel Xeon inference</p>
+        <h1>vLLM Recipes Deployment Manager</h1>
+        <p class="subtitle">Hardware-aware configuration, supervised serving, and maintenance-mode tuning.</p>
+      </div>
+      <div id="status-badge" class="badge">Loading</div>
+    </header>
+
+    <main>
+      <section class="overview grid">
+        <article class="card"><span>Model</span><strong id="model">—</strong></article>
+        <article class="card"><span>Hardware recipe</span><strong id="hardware">—</strong></article>
+        <article class="card"><span>vLLM endpoint</span><strong id="endpoint">—</strong></article>
+        <article class="card"><span>Sweep</span><strong id="sweep-state">Not started</strong></article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <div><p class="eyebrow">Deployment</p><h2>Active configuration</h2></div>
+          <button id="restart">Restart vLLM</button>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-config="active">config.yml</button>
+          <button class="tab" data-config="environment">env.sh</button>
+          <button class="tab" data-config="initial">Initial config</button>
+        </div>
+        <pre id="config">Loading configuration…</pre>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <div><p class="eyebrow">Maintenance operation</p><h2>Tune all</h2></div>
+          <span class="warning">Inference stops during the sweep</span>
+        </div>
+        <form id="sweep-form" class="form-grid">
+          <label>Input tokens<input name="input_tokens" type="number" min="1" value="128" required></label>
+          <label>Output tokens<input name="output_tokens" type="number" min="1" value="128" required></label>
+          <label>Concurrency<input name="concurrency" type="number" min="1" value="32" required></label>
+          <label>TTFT SLA (ms)<input name="ttft_sla_ms" type="number" min="1" value="3000"></label>
+          <label>TPOT SLA (ms)<input name="tpot_sla_ms" type="number" min="1" value="100"></label>
+          <button class="primary" type="submit">Start maintenance sweep</button>
+        </form>
+        <p id="job-message" class="muted"></p>
+      </section>
+
+      <section id="recommendation-panel" class="panel hidden">
+        <div class="panel-title">
+          <div><p class="eyebrow">Measured result</p><h2>Recommended configuration</h2></div>
+          <button id="apply" class="primary">Apply and restart</button>
+        </div>
+        <pre id="recommendation"></pre>
+        <h3>Sweep report</h3>
+        <iframe id="report" title="vLLM sweep report" sandbox="allow-scripts"></iframe>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title"><div><p class="eyebrow">Diagnostics</p><h2>Recent vLLM log</h2></div></div>
+        <pre id="logs">Loading logs…</pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
