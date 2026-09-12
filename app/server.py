@@ -33,6 +33,10 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from hardware import HardwareSelection, detect_recipe_hardware
+from model_support import check_model_support
+from persisted_state import restore_last_job
+from recipe_errors import classify_recipe_error
+from sweep_runtime import run_sweep_process
 
 
 STATE_DIR = Path(os.environ.get("EIM_STATE_DIR", "/workspace/eim"))
@@ -47,6 +51,7 @@ ACTIVE_CONFIG = CONFIG_DIR / "active-config.yml"
 PREVIOUS_CONFIG = CONFIG_DIR / "previous-config.yml"
 ACTIVE_ENV = CONFIG_DIR / "active-env.sh"
 STATE_FILE = STATE_DIR / "state.json"
+DEMO_REPORT = STATE_DIR / "demo" / "sweep-report.html"
 ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -69,12 +74,25 @@ class Manager:
         self.hardware_selection: HardwareSelection | None = None
         self.vllm_host = os.environ.get("EIM_VLLM_HOST", "0.0.0.0")
         self.vllm_port = int(os.environ.get("EIM_VLLM_PORT", "8000"))
+        self.model_support_url = os.environ.get("EIM_MODEL_SUPPORT_URL", "").strip()
+        self.model_support_timeout = float(
+            os.environ.get("EIM_MODEL_SUPPORT_TIMEOUT", "180")
+        )
         self.process: subprocess.Popen[str] | None = None
         self.process_log: Any = None
         self.lock = threading.RLock()
         self.job: dict[str, Any] | None = None
         self.last_error: str | None = None
+        self.error_code: str | None = None
+        self.model_support: dict[str, Any] = {
+            "state": "not_configured" if not self.model_support_url else "idle"
+        }
         self._shutdown = False
+        self.restore_state()
+
+    def restore_state(self) -> None:
+        """Restore the last sweep while treating files on disk as authoritative."""
+        self.job = restore_last_job(STATE_FILE, JOBS_DIR, self.model)
 
     def startup(self) -> None:
         if not self.model:
@@ -85,7 +103,29 @@ class Manager:
             self.generate_initial_config()
             self.start_vllm()
         except Exception as exc:  # keep the portal available for diagnosis
-            self.last_error = str(exc)
+            classified = classify_recipe_error(
+                self.read_file(LOG_DIR / "recipe-generation.log"),
+                self.model,
+                self._selected_hardware_name(),
+            )
+            if classified:
+                self.error_code = classified.code
+                self.last_error = classified.message
+                self.model_support = {
+                    "state": (
+                        "checking" if self.model_support_url else "not_configured"
+                    )
+                }
+                self._write_state()
+                if self.model_support_url:
+                    self.model_support = check_model_support(
+                        self.model_support_url,
+                        self.model,
+                        self.model_support_timeout,
+                    )
+            else:
+                self.error_code = "startup_failed"
+                self.last_error = str(exc)
             self._write_state()
 
     def shutdown(self) -> None:
@@ -140,6 +180,11 @@ class Manager:
                 self._write_state()
             return self.hardware_selection
 
+    def _selected_hardware_name(self) -> str:
+        if self.hardware_selection:
+            return self.hardware_selection.recipe_key
+        return self.hardware_request
+
     @staticmethod
     def _run_checked(command: list[str], log_path: Path) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,6 +207,10 @@ class Manager:
         self._run_checked(command, LOG_DIR / "recipe-generation.log")
         shutil.copy2(INITIAL_CONFIG, ACTIVE_CONFIG)
         self.last_error = None
+        self.error_code = None
+        self.model_support = {
+            "state": "not_configured" if not self.model_support_url else "idle"
+        }
         self._write_state()
 
     @staticmethod
@@ -216,6 +265,7 @@ class Manager:
                 start_new_session=True,
             )
             self.last_error = None
+            self.error_code = None
             self._write_state()
 
     def stop_vllm(self, timeout: int = 60) -> None:
@@ -279,9 +329,12 @@ class Manager:
                 },
                 "job": self.job,
                 "last_error": self.last_error,
+                "error_code": self.error_code,
+                "model_support": self.model_support,
                 "files": {
                     "active_config": ACTIVE_CONFIG.is_file(),
                     "initial_config": INITIAL_CONFIG.is_file(),
+                    "demo_report": DEMO_REPORT.is_file(),
                 },
             }
 
@@ -337,15 +390,7 @@ class Manager:
             sweep_child_env = os.environ.copy()
             sweep_child_env.update(self.parse_env_file(sweep_env))
             with (job_dir / "sweep.log").open("w", encoding="utf-8") as log:
-                result = subprocess.run(
-                    ["bash", str(runner)],
-                    cwd=sweep_dir,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=sweep_child_env,
-                    check=False,
-                )
+                result = run_sweep_process(runner, log, sweep_child_env)
             if result.returncode:
                 raise RuntimeError(
                     f"Sweep failed with exit code {result.returncode}; "
@@ -439,6 +484,8 @@ class Manager:
             ),
             "job": self.job,
             "last_error": self.last_error,
+            "error_code": self.error_code,
+            "model_support": self.model_support,
             "updated_at": time.time(),
         }
         temporary = STATE_FILE.with_suffix(".tmp")
@@ -559,6 +606,13 @@ def _current_job_file(relative: str) -> Path:
 @app.get("/reports/sweep", response_class=HTMLResponse)
 def sweep_report() -> FileResponse:
     return FileResponse(_current_job_file("sweep-report.html"))
+
+
+@app.get("/reports/demo", response_class=HTMLResponse)
+def demo_sweep_report() -> FileResponse:
+    if not DEMO_REPORT.is_file():
+        raise HTTPException(status_code=404, detail="Demo report is unavailable")
+    return FileResponse(DEMO_REPORT)
 
 
 @app.get("/api/recommendation", response_class=PlainTextResponse)

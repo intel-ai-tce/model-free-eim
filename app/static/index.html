@@ -24,6 +24,23 @@
         <article class="card"><span>Sweep</span><strong id="sweep-state">Not started</strong></article>
       </section>
 
+      <section id="recipe-alert" class="alert hidden" role="alert">
+        <div class="panel-title">
+          <div>
+            <p class="eyebrow">Configuration required</p>
+            <h2>Recipe unavailable</h2>
+          </div>
+          <button id="toggle-recipe-log">View recipe-generation log</button>
+        </div>
+        <p id="recipe-alert-message"></p>
+        <div id="model-support-result" class="support-result">
+          <span>vLLM CPU model support</span>
+          <strong id="model-support-verdict">Waiting</strong>
+          <p id="model-support-message"></p>
+        </div>
+        <pre id="recipe-log" class="hidden"></pre>
+      </section>
+
       <section class="panel">
         <div class="panel-title">
           <div><p class="eyebrow">Deployment</p><h2>Active configuration</h2></div>
@@ -61,6 +78,16 @@
         <pre id="recommendation"></pre>
         <h3>Sweep report</h3>
         <iframe id="report" title="vLLM sweep report" sandbox="allow-scripts"></iframe>
+      </section>
+
+      <section id="demo-report-section" class="panel hidden">
+        <div class="panel-title">
+          <div><p class="eyebrow">Example result</p><h2>Demo sweep report</h2></div>
+          <button id="toggle-demo-report">View demo sweep report</button>
+        </div>
+        <div id="demo-report-container" class="hidden">
+          <iframe id="demo-report" title="Demo sweep report" sandbox="allow-scripts" loading="lazy"></iframe>
+        </div>
       </section>
 
       <section class="panel">

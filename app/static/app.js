@@ -41,8 +41,44 @@ async function refresh() {
     $("#endpoint").textContent = `:${status.vllm.port}`;
     $("#status-badge").textContent = `vLLM ${status.vllm.state}`;
     $("#status-badge").classList.toggle("stopped", status.vllm.state !== "healthy");
+    const recipeUnavailable = [
+      "recipe_not_found",
+      "recipe_hardware_unavailable",
+    ].includes(status.error_code);
     $("#sweep-state").textContent = status.job ? `${status.job.state}: ${status.job.stage}` : "Not started";
-    $("#job-message").textContent = status.last_error || (status.job && status.job.error) || "";
+    $("#job-message").textContent = (status.job && status.job.error)
+      || (recipeUnavailable ? "" : status.last_error)
+      || "";
+    $("#recipe-alert").classList.toggle("hidden", !recipeUnavailable);
+    $("#recipe-alert-message").textContent = recipeUnavailable
+      ? status.last_error
+      : "";
+    const support = status.model_support || { state: "not_configured" };
+    const supportResult = $("#model-support-result");
+    supportResult.className = `support-result ${support.state}`;
+    const supportLabels = {
+      idle: "Waiting",
+      checking: "Checking…",
+      completed: support.verdict || "Completed",
+      unavailable: "Service unavailable",
+      failed: "Check failed",
+      not_configured: "Not configured",
+    };
+    $("#model-support-verdict").textContent =
+      supportLabels[support.state] || "Unknown";
+    $("#model-support-message").textContent = support.message || (
+      support.state === "not_configured"
+        ? "Set EIM_MODEL_SUPPORT_URL to enable the fast support check."
+        : ""
+    );
+
+    const demoAvailable = Boolean(status.files.demo_report);
+    $("#demo-report-section").classList.toggle("hidden", !demoAvailable);
+    if (!demoAvailable) {
+      $("#demo-report-container").classList.add("hidden");
+      $("#demo-report").removeAttribute("src");
+      $("#toggle-demo-report").textContent = "View demo sweep report";
+    }
 
     const running = status.job && ["queued", "running"].includes(status.job.state);
     $("#sweep-form").querySelector("button").disabled = Boolean(running);
@@ -96,6 +132,35 @@ $("#apply").addEventListener("click", async () => {
   catch (error) { alert(error.message); }
   loadConfig("active");
   refresh();
+});
+
+$("#toggle-demo-report").addEventListener("click", () => {
+  const container = $("#demo-report-container");
+  const frame = $("#demo-report");
+  const opening = container.classList.contains("hidden");
+  container.classList.toggle("hidden", !opening);
+  $("#toggle-demo-report").textContent = opening
+    ? "Hide demo sweep report"
+    : "View demo sweep report";
+  if (opening && !frame.getAttribute("src")) {
+    frame.src = "/reports/demo";
+  }
+});
+
+$("#toggle-recipe-log").addEventListener("click", async () => {
+  const log = $("#recipe-log");
+  const opening = log.classList.contains("hidden");
+  log.classList.toggle("hidden", !opening);
+  $("#toggle-recipe-log").textContent = opening
+    ? "Hide recipe-generation log"
+    : "View recipe-generation log";
+  if (opening && !log.textContent) {
+    try {
+      log.textContent = await (await request("/api/logs/recipe")).text();
+    } catch (error) {
+      log.textContent = error.message;
+    }
+  }
 });
 
 loadConfig();

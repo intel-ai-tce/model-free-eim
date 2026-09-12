@@ -1,42 +1,129 @@
-# Standalone vLLM Recipes Deployment Manager
+# vLLM Recipes Deployment Manager
 
-This project builds an independent management service on top of the official
-vLLM CPU image. It does not patch, build, or contribute files to the vLLM
-repository.
+This project provides a deployment manager built on the **official vLLM CPU
+image** and uses **online vLLM Recipes** to configure and optimize model
+serving.
 
-During the Docker build, an intermediate stage fetches only `tools/recipes`
-from the configured repository and revision. The final image contains:
+## Key Benefits
 
-- the published vLLM runtime from `vllm/vllm-openai-cpu:latest-x86_64`;
-- the selected vLLM Recipes tools;
-- a persistent manager and web portal.
+- **No static model recipes in the Docker image**
+- **Recipe updates do not require rebuilding the image**
+- **New models added to vLLM Recipes can be deployed without changing the image**
+- **Hardware-aware configuration based on the detected platform**
+- **vLLM Recipes tools provide configuration, sweep, and recommendation**
+
+## Architecture
+
+```mermaid
+flowchart LR
+
+    subgraph ONLINE["Online Services"]
+        R["Online vLLM Recipes"]
+        S["Online Model Support Check"]
+    end
+
+    subgraph IMAGE["Deployment Docker Image"]
+        T["vLLM Recipes Tools"]
+        M["Deployment Manager"]
+        V["Official vLLM Runtime"]
+
+        T --> M
+        M --> V
+    end
+
+    R --> T
+    S --> M
+
+    classDef online fill:#e8f3ff,stroke:#2563eb,stroke-width:2px,color:#0f172a;
+    classDef local fill:#f5f5f5,stroke:#666,color:#111;
+
+    class R,S online;
+    class T,M,V local;
+```
+
+The deployment image is based on the **official vLLM image** and adds the
+**vLLM Recipes tools** and **Deployment Manager**. The manager uses online
+services for **vLLM Recipes** and **model support checking**, while the vLLM
+runtime and management components remain inside the deployment image.
+
+### Deployment Manager Flow
+
+```mermaid
+flowchart TB
+
+    subgraph INPUTS["Inputs"]
+        direction LR
+        A["Model"]
+        S["Online Model Support Check"]
+        R["Online vLLM Recipes"]
+    end
+
+    subgraph FLOW["Deployment Manager Flow"]
+        direction TB
+        M["Deployment Manager"]
+        H["Detect Hardware"]
+        T["vLLM Recipes Tools"]
+        G["Generate Initial Config"]
+        V["Start vLLM"]
+        P["Parameter Sweep"]
+        Q["Generate Recommendation"]
+        AP["Apply Recommendation"]
+
+        M --> H
+        H --> T
+        T --> G
+        G --> V
+        V --> P
+        P --> Q
+        Q --> AP
+        AP --> V
+    end
+
+    subgraph OUTPUTS["Outputs"]
+        direction LR
+        C["config.yml"]
+        REP["sweep-report.html"]
+        RC["recommended-config.yml"]
+    end
+
+    A --> M
+    S --> M
+    R --> T
+
+    G --> C
+    P --> REP
+    Q --> RC
+
+    classDef input fill:#ffffff,stroke:#64748b,stroke-width:2px,color:#0f172a;
+    classDef online fill:#e8f3ff,stroke:#2563eb,stroke-width:2px,color:#0f172a;
+    classDef manager fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#0f172a;
+    classDef recipes fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#0f172a;
+    classDef action fill:#f5f5f5,stroke:#666,stroke-width:2px,color:#111;
+    classDef output fill:#fff7e6,stroke:#d97706,stroke-width:2px,color:#111;
+
+    class A input;
+    class S,R online;
+    class M manager;
+    class T recipes;
+    class H,G,V,P,Q,AP action;
+    class C,RC,REP output;
+```
+
+The manager receives the model, **online model support check**, and **online
+vLLM Recipes** as inputs. The deployment workflow runs top-to-bottom, and all
+generated configuration and sweep artifacts are grouped together as outputs.
 
 Inference clients connect directly to vLLM on port 8000. The manager remains
 available on port 8080 and is not an inference proxy.
 
-## Flow
-
-```text
-container startup
-  -> recipe_json_to_vllm_config.py --detect-hardware
-  -> initial-config.yml + env.sh
-  -> supervised vllm serve
-
-maintenance sweep
-  -> stop vLLM
-  -> generate and run full sweep
-  -> recommended-config.yml + sweep-report.html
-  -> restart the original vLLM configuration
-  -> let the user review and optionally apply the recommendation
-```
-
 ## Build
 
 ```bash
+./scripts/prepare-recipes.sh
 docker build -t vllm-recipes-manager:latest .
 ```
 
-The defaults are:
+The preparation defaults are:
 
 ```text
 VLLM_BASE_IMAGE=vllm/vllm-openai-cpu:latest-x86_64
@@ -44,18 +131,39 @@ VLLM_RECIPES_REPOSITORY=https://github.com/intel-ai-tce/vllm.git
 VLLM_RECIPES_REF=recipe_improve
 ```
 
-They can be replaced without changing this project:
+They can be replaced without changing this project. A commit SHA is recommended
+for a repeatable build:
 
 ```bash
+VLLM_RECIPES_REPOSITORY=https://github.com/intel-ai-tce/vllm.git \
+VLLM_RECIPES_REF=d3eb8cb7d952024c82b161875fd0a7ac76aadd71 \
+  ./scripts/prepare-recipes.sh
+
 docker build \
   --build-arg VLLM_BASE_IMAGE=vllm/vllm-openai-cpu:latest-x86_64 \
-  --build-arg VLLM_RECIPES_REPOSITORY=https://github.com/intel-ai-tce/vllm.git \
-  --build-arg VLLM_RECIPES_REF=recipe_improve \
   -t vllm-recipes-manager:latest .
 ```
 
 For a reproducible production build, set `VLLM_BASE_IMAGE` to an immutable
-image digest and `VLLM_RECIPES_REF` to a tested commit SHA.
+image digest and stage Recipes from a tested commit SHA. The staged directory
+records the resolved commit in `vendor/recipes/SOURCE_COMMIT`.
+
+### Why Recipes is prepared outside Docker
+
+The vLLM repository is large, and Docker/BuildKit may not share the host's
+GitHub proxy configuration. A `git clone` inside the Dockerfile can therefore
+time out even when GitHub is reachable from the host. The preparation script:
+
+- fetches only one ref at depth one;
+- uses Git partial-clone blob filtering;
+- checks out only `tools/recipes` with sparse checkout;
+- makes the subsequent Docker build independent of GitHub.
+
+An interrupted manual clone named `vllm/` is excluded from the Docker build
+context, so it will not accidentally make the context very large.
+
+The running service still needs outbound access to `https://recipes.vllm.ai`
+for recipe discovery and to the configured model source for model downloads.
 
 ## Run
 
@@ -103,6 +211,15 @@ generated exports, and launches:
 vllm serve --config /workspace/eim/config/active-config.yml \
   --host 0.0.0.0 --port 8000
 ```
+
+If the Recipes API has no matching model, or the model has no rendering for the
+detected hardware, the manager stays available and displays a **Recipe
+unavailable** alert. The alert distinguishes recipe availability from other
+startup failures and provides an expandable recipe-generation log. When
+`EIM_MODEL_SUPPORT_URL` is set, the manager also submits a fast, non-smoke-test
+check to the vLLM CPU model-support service and displays its verdict in the
+deployment alert. A supported verdict is advisory and does not start vLLM
+without a tested recipe configuration.
 
 ### Automatic Xeon detection
 
@@ -154,6 +271,27 @@ and TTFT/TPOT SLAs. Starting a sweep:
 
 Applying the recommendation remains a separate action and restarts vLLM.
 
+The manager restores the most recent sweep recorded in `state.json` after a
+restart. It validates the saved job ID and refreshes report and recommendation
+availability from the job directory. A sweep that was queued or running when
+the manager stopped is restored as interrupted rather than running.
+
+### Optional demo report
+
+To show a previously generated, self-contained sweep report without treating
+it as a live result or enabling recommendation application, copy it into the
+persistent state directory:
+
+```bash
+mkdir -p state/demo
+cp /path/to/sweep-report.html state/demo/sweep-report.html
+```
+
+The portal then displays a **View demo sweep report** button. The report stays
+hidden and unloaded until the button is clicked. Because `state` is mounted at
+`/workspace/eim`, the demo report is available to the running container
+without rebuilding the image.
+
 ## Configuration
 
 | Environment variable | Default | Purpose |
@@ -161,8 +299,11 @@ Applying the recommendation remains a separate action and restarts vLLM.
 | `EIM_MODEL_ID` | required | Model ID used for Recipes discovery |
 | `EIM_HARDWARE` | `auto` | Auto-detect `xeon5`/`xeon6`, or explicitly set a Recipes key |
 | `EIM_VLLM_PORT` | `8000` | Direct vLLM API port |
+| `EIM_VLLM_WORKDIR` | `/vllm-workspace` | Runtime working directory used by vLLM and sweep subprocesses |
 | `EIM_MANAGER_PORT` | `8080` | Portal and management API port |
 | `EIM_STATE_DIR` | `/workspace/eim` | Persistent configs, jobs, logs and reports |
+| `EIM_MODEL_SUPPORT_URL` | unset | Base URL of the optional vLLM CPU model-support service |
+| `EIM_MODEL_SUPPORT_TIMEOUT` | `180` | Model-support request timeout in seconds |
 | `EIM_API_TOKEN` | unset | Optional bearer token for mutating APIs |
 
 For shared deployments, set `EIM_API_TOKEN` and place authentication in front
@@ -174,8 +315,10 @@ security boundary.
 - One model and one local vLLM server are supported.
 - The sweep intentionally interrupts inference.
 - Most configuration changes require a vLLM restart.
-- Historical sweep discovery after a manager restart is not implemented yet.
-- The build requires access to the configured Recipes Git repository.
+- Only the most recent persisted sweep is restored; browsing all historical
+  jobs is not implemented yet.
+- `scripts/prepare-recipes.sh` requires host access to the configured Recipes
+  Git repository; the Docker build itself does not.
 - Automatic mapping currently covers Xeon 5 and Xeon 6. Xeon 4 and unknown
   processors require an explicit supported Recipes key.
 - The manager remains available when recipe generation or vLLM startup fails,
