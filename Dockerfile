@@ -7,14 +7,15 @@ FROM ${VLLM_BASE_IMAGE}
 USER root
 WORKDIR /opt/vllm-recipes-manager
 
-# Recipes is staged by scripts/prepare-recipes.sh before the image build. This
-# keeps GitHub access out of BuildKit and avoids cloning the full vLLM repo.
-COPY vendor/recipes/ /opt/vllm-recipes/
+# vLLM Recipes tools are staged by scripts/prepare-recipes.sh before the image
+# build. This keeps GitHub access out of BuildKit and avoids cloning the full
+# vLLM repo. The staged directory contains tooling, not online recipe data.
+COPY vendor/vllm-recipes-tools/ /opt/vllm-recipes/
 COPY requirements.txt /opt/vllm-recipes-manager/requirements.txt
 COPY app/ /opt/vllm-recipes-manager/app/
 
 RUN test -f /opt/vllm-recipes/recipe_json_to_vllm_config.py \
-    || (echo >&2 "Recipes not staged; run ./scripts/prepare-recipes.sh first"; exit 1) \
+    || (echo >&2 "vLLM Recipes tools not staged; run ./scripts/prepare-recipes.sh first"; exit 1) \
     && python3 -m pip install --no-cache-dir \
       -r /opt/vllm-recipes/requirements.txt \
       -r /opt/vllm-recipes-manager/requirements.txt \

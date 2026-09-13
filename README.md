@@ -145,10 +145,16 @@ docker build \
 ```
 
 For a reproducible production build, set `VLLM_BASE_IMAGE` to an immutable
-image digest and stage Recipes from a tested commit SHA. The staged directory
-records the resolved commit in `vendor/recipes/SOURCE_COMMIT`.
+image digest and stage the vLLM Recipes tools from a tested commit SHA. The
+staged tooling records the resolved commit in
+`vendor/vllm-recipes-tools/SOURCE_COMMIT`.
 
-### Why Recipes is prepared outside Docker
+`vendor/vllm-recipes-tools/` contains only the code copied from vLLM
+`tools/recipes`; it does **not** contain model or hardware recipe data. The
+actual recipes remain online and are discovered from `https://recipes.vllm.ai`
+at runtime.
+
+### Why Recipes tools are prepared outside Docker
 
 The vLLM repository is large, and Docker/BuildKit may not share the host's
 GitHub proxy configuration. A `git clone` inside the Dockerfile can therefore

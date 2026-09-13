@@ -7,7 +7,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project_dir=$(cd -- "${script_dir}/.." && pwd)
 repository=${VLLM_RECIPES_REPOSITORY:-https://github.com/intel-ai-tce/vllm.git}
 ref=${VLLM_RECIPES_REF:-recipe_improve}
-destination="${project_dir}/vendor/recipes"
+destination="${project_dir}/vendor/vllm-recipes-tools"
 temporary_dir=$(mktemp -d)
 
 cleanup() {
@@ -16,9 +16,9 @@ cleanup() {
 trap cleanup EXIT
 
 checkout="${temporary_dir}/checkout"
-staged="${temporary_dir}/recipes"
+staged="${temporary_dir}/vllm-recipes-tools"
 
-echo "Fetching only tools/recipes from ${repository} (${ref})..."
+echo "Fetching vLLM Recipes tools from ${repository} (${ref})..."
 git init -q "${checkout}"
 git -C "${checkout}" remote add origin "${repository}"
 git -C "${checkout}" sparse-checkout init --cone
@@ -43,9 +43,9 @@ mkdir -p "$(dirname -- "${destination}")"
 if [[ -e "${destination}" ]]; then
   backup="${destination}.backup.$(date +%Y%m%d%H%M%S)"
   mv -- "${destination}" "${backup}"
-  echo "Previous staged Recipes saved at ${backup}"
+  echo "Previous staged vLLM Recipes tools saved at ${backup}"
 fi
 mv -- "${staged}" "${destination}"
 
-echo "Staged Recipes commit ${commit}"
+echo "Staged vLLM Recipes tools commit ${commit}"
 echo "Next: docker build -t vllm-recipes-manager:latest ${project_dir}"

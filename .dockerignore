@@ -5,4 +5,4 @@ __pycache__
 state
 *.tar.gz
 /vllm
-vendor/recipes.backup.*
+vendor/vllm-recipes-tools.backup.*
